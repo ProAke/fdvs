@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FDVS — Folder VS</title>
+<style>
+  :root{
+    --bg:#0b0f16; --panel:#121a26; --panel2:#0f1621; --line:#22304a;
+    --txt:#e8eef7; --muted:#8ba0bd; --accent:#3b82f6; --accent2:#8b5cf6;
+    --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --cyan:#22d3ee;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans Thai',sans-serif;
+       background:var(--bg);color:var(--txt);min-height:100vh;font-size:14px}
+
+  /* ── Header ── */
+  header{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,#121a26,#0f1621);
+         border-bottom:1px solid var(--line);padding:14px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header .logo{font-size:19px;font-weight:800;letter-spacing:.5px}
+  header .logo b{color:var(--accent)}
+  header .sub{font-size:12px;color:var(--muted)}
+  header .spacer{flex:1}
+  .pill{font-size:11px;padding:4px 10px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+  .pill.ok{border-color:#22c55e55;color:var(--ok);background:#22c55e14}
+  .pill.bad{border-color:#ef444455;color:var(--bad);background:#ef444414}
+
+  /* ── Layout ── */
+  .wrap{max-width:1500px;margin:0 auto;padding:20px 22px 60px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .card h2{font-size:15px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .card h2 .step{background:var(--accent);color:#fff;width:20px;height:20px;border-radius:6px;
+                 display:grid;place-items:center;font-size:11px;font-weight:800}
+
+  /* ── Pickers ── */
+  .pickers{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .side{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .side.left{border-top:3px solid var(--accent)}
+  .side.right{border-top:3px solid var(--accent2)}
+  .side .label{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.6px}
+  .side input{width:100%;background:#080d14;border:1px solid var(--line);border-radius:9px;
+              padding:10px 12px;color:var(--txt);font-size:13px;font-family:ui-monospace,monospace}
+  .side input:focus{outline:none;border-color:var(--accent)}
+  .side .row{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .quick{font-size:11px;padding:5px 10px;border-radius:7px;background:#1a2537;border:1px solid var(--line);
+         color:var(--muted);cursor:pointer}
+  .quick:hover{border-color:var(--accent);color:var(--txt)}
+  .access{margin-top:9px;font-size:12px;padding:8px 10px;border-radius:8px;display:none}
+  .access.show{display:block}
+  .access.ok{background:#22c55e14;border:1px solid #22c55e44;color:var(--ok)}
+  .access.warn{background:#f59e0b14;border:1px solid #f59e0b44;color:var(--warn)}
+  .access.bad{background:#ef444414;border:1px solid #ef444444;color:var(--bad)}
+
+  /* ── Buttons ── */
+  .btn{padding:9px 18px;border-radius:9px;border:none;font-size:13px;font-weight:600;cursor:pointer;
+       transition:.15s;font-family:inherit}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn-primary{background:linear-gradient(135deg,var(--accent),#2563eb);color:#fff}
+  .btn-primary:hover:not(:disabled){opacity:.9}
+  .btn-violet{background:linear-gradient(135deg,var(--accent2),#6d28d9);color:#fff}
+  .btn-violet:hover:not(:disabled){opacity:.9}
+  .btn-ghost{background:#1a2537;border:1px solid var(--line);color:var(--muted)}
+  .btn-ghost:hover:not(:disabled){border-color:var(--accent);color:var(--txt)}
+  .btn-danger{background:#7f1d1d;border:1px solid #ef444466;color:#fca5a5}
+  .btn-danger:hover:not(:disabled){background:#991b1b}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+
+  /* ── Options ── */
+  .opts{display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:12.5px;color:var(--muted);margin-top:12px;
+        padding-top:12px;border-top:1px solid var(--line)}
+  .opts label{display:flex;align-items:center;gap:6px;cursor:pointer}
+  .opts select,.opts input[type=number]{background:#080d14;border:1px solid var(--line);border-radius:7px;
+        padding:5px 8px;color:var(--txt);font-size:12px;font-family:inherit}
+  .opts input[type=checkbox]{accent-color:var(--accent);width:14px;height:14px}
+
+  /* ── Progress ── */
+  .progress{display:none;margin-top:14px}
+  .progress.show{display:block}
+  .bar{height:6px;background:#0a1018;border-radius:4px;overflow:hidden}
+  .bar > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--cyan));
+           transition:width .3s;border-radius:4px}
+  .progress .msg{font-size:12px;color:var(--muted);margin-top:8px;font-family:ui-monospace,monospace}
+
+  /* ── Summary ── */
+  .summary{display:none;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .summary.show{display:grid}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:14px}
+  .stat .n{font-size:24px;font-weight:800;line-height:1.1}
+  .stat .l{font-size:11px;color:var(--muted);margin-top:3px}
+  .stat.same .n{color:var(--ok)} .stat.diff .n{color:var(--warn)}
+  .stat.only .n{color:var(--cyan)} .stat.bytes .n{color:var(--accent2);font-size:17px}
+  .verdict{padding:16px 18px;border-radius:12px;font-size:14px;font-weight:600;margin-bottom:16px;display:none}
+  .verdict.show{display:block}
+  .verdict.equal{background:#22c55e14;border:1px solid #22c55e55;color:var(--ok)}
+  .verdict.differ{background:#f59e0b14;border:1px solid #f59e0b55;color:var(--warn)}
+  .verdict .detail{font-weight:400;font-size:13px;color:var(--muted);margin-top:7px;line-height:1.7}
+
+  /* ── Toolbar ── */
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .toolbar input[type=search]{flex:1;min-width:200px;background:#080d14;border:1px solid var(--line);
+        border-radius:9px;padding:9px 13px;color:var(--txt);font-size:13px}
+  .toolbar input[type=search]:focus{outline:none;border-color:var(--accent)}
+  .tabs{display:flex;gap:5px;flex-wrap:wrap}
+  .tab{font-size:12px;padding:6px 12px;border-radius:8px;background:#1a2537;border:1px solid var(--line);
+       color:var(--muted);cursor:pointer}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .tab .c{opacity:.75;margin-left:4px}
+
+  /* ── Table ── */
+  .tablewrap{overflow:auto;border:1px solid var(--line);border-radius:11px;max-height:560px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  thead th{position:sticky;top:0;background:#16202f;padding:10px 12px;text-align:left;font-size:11px;
+           text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--line);z-index:2}
+  tbody td{padding:9px 12px;border-bottom:1px solid #1a2436;vertical-align:top}
+  tbody tr:hover{background:#16202f}
+  .path{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all}
+  .path .dir{color:var(--muted)}
+  .badge{font-size:10.5px;padding:2px 8px;border-radius:5px;font-weight:700;white-space:nowrap}
+  .badge.same{background:#22c55e22;color:var(--ok)}
+  .badge.left_only{background:#3b82f622;color:#60a5fa}
+  .badge.right_only{background:#8b5cf622;color:#a78bfa}
+  .badge.size_differs{background:#f59e0b22;color:var(--warn)}
+  .badge.content_differs{background:#ef444422;color:#f87171}
+  .badge.mtime_differs{background:#64748b33;color:#94a3b8}
+  .badge.type_differs,.badge.symlink_differs{background:#ec489922;color:#f472b6}
+  .sz{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--muted)}
+  .sz.diff{color:var(--warn)}
+  .empty{text-align:center;padding:40px;color:var(--muted);font-size:13px}
+
+  /* ── Modal ── */
+  .modal{display:none;position:fixed;inset:0;background:rgba(3,7,12,.78);z-index:200;
+         align-items:center;justify-content:center;padding:20px}
+  .modal.show{display:flex}
+  .modal .box{background:var(--panel);border:1px solid var(--line);border-radius:15px;
+              max-width:820px;width:100%;max-height:86vh;display:flex;flex-direction:column}
+  .modal .hd{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  .modal .hd h3{font-size:15px;font-weight:700;flex:1}
+  .modal .bd{padding:16px 20px;overflow:auto;flex:1}
+  .modal .ft{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+  .crumb{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--muted);padding:8px 0;
+         word-break:break-all;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .flist{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px}
+  .fitem{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;
+         border:1px solid transparent;font-size:12.5px}
+  .fitem:hover{background:#1a2537;border-color:var(--line)}
+  .fitem .ico{width:16px;text-align:center;flex-shrink:0}
+  .fitem .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fitem .sz{font-size:10.5px}
+
+  /* ── Reports list ── */
+  .rlist{display:grid;gap:8px}
+  .ritem{display:flex;gap:12px;align-items:center;background:var(--panel2);border:1px solid var(--line);
+         border-radius:10px;padding:11px 14px;font-size:12.5px;cursor:pointer}
+  .ritem:hover{border-color:var(--accent)}
+  .ritem .rpaths{flex:1;min-width:0}
+  .ritem .rpaths div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace;font-size:11.5px}
+  .ritem .rpaths .t{font-size:11px;color:var(--muted);margin-bottom:3px;font-family:inherit}
+
+  /* ── Toast ── */
+  #toasts{position:fixed;bottom:20px;right:20px;z-index:400;display:flex;flex-direction:column;gap:9px}
+  .toast{background:var(--panel);border:1px solid var(--accent);border-left:4px solid var(--accent);
+         border-radius:10px;padding:12px 18px;font-size:13px;max-width:400px;animation:sl .25s}
+  .toast.ok{border-color:var(--ok);border-left-color:var(--ok)}
+  .toast.bad{border-color:var(--bad);border-left-color:var(--bad)}
+  @keyframes sl{from{transform:translateX(30px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+  /* ── Log ── */
+  .logbox{background:#070b11;border:1px solid var(--line);border-radius:10px;padding:12px;
+          font-family:ui-monospace,monospace;font-size:11.5px;color:#7dd3a0;max-height:180px;
+          overflow:auto;white-space:pre-wrap;line-height:1.6}
+
+  @media(max-width:900px){.pickers{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><b>FDVS</b> — Folder VS</div>
+  <div class="sub">เทียบ &amp; ซิงค์โฟลเดอร์</div>
+  <div class="spacer"></div>
+  <span class="pill" id="srvPill">กำลังเชื่อมต่อ…</span>
+  <button class="btn btn-ghost" onclick="openReports()">ประวัติการสแกน</button>
+</header>
+
+<div class="wrap">
+
+  <!-- ── STEP 1: pick folders ── -->
+  <div class="card">
+    <h2><span class="step">1</span> เลือกโฟลเดอร์สองฝั่ง</h2>
+    <div class="pickers">
+      <div class="side left">
+        <div class="label">◀ ฝั่ง A (Left)</div>
+        <input id="leftPath" placeholder="/Volumes/MNG/... หรือ ~/Documents" spellcheck="false">
+        <div class="row">
+          <button class="quick" onclick="browse('left')">📁 เลือกโฟลเดอร์</button>
+          <button class="quick" onclick="checkAccess('left')">🔐 ตรวจสอบสิทธิ์</button>
+        </div>
+        <div class="access" id="leftAccess"></div>
+      </div>
+      <div class="side right">
+        <div class="label">ฝั่ง B (Right) ▶</div>
+        <input id="rightPath" placeholder="/Volumes/PLAY/... หรือ ~/Desktop" spellcheck="false">
+        <div class="row">
+          <button class="quick" onclick="browse('right')">📁 เลือกโฟลเดอร์</button>
+          <button class="quick" onclick="checkAccess('right')">🔐 ตรวจสอบสิทธิ์</button>
+        </div>
+        <div class="access" id="rightAccess"></div>
+      </div>
+    </div>
+
+    <div class="opts">
+      <label>โหมดเทียบ:
+        <select id="hashMode">
+          <option value="auto" selected>auto — hash เมื่อขนาดเท่าแต่เวลาไม่ตรง</option>
+          <option value="all">all — hash ทุกไฟล์ (แม่นสุด, ช้า)</option>
+          <option value="none">none — เทียบขนาด+เวลา (เร็วสุด)</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="cmpMtime" checked> เทียบเวลาแก้ไข</label>
+      <label>คลาดเคลื่อน (วินาที): <input type="number" id="mtimeTol" value="2" min="0" step="1" style="width:64px"></label>
+      <label><input type="checkbox" id="followLinks"> ตาม symlink</label>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="scanBtn" onclick="startScan()">▶ สแกนและเทียบ</button>
+      <button class="btn btn-ghost" onclick="swapSides()">⇄ สลับฝั่ง</button>
+      <button class="btn btn-ghost" onclick="clearAll()">ล้างผลลัพธ์</button>
+    </div>
+
+    <div class="progress" id="progress">
+      <div class="bar"><i id="barFill"></i></div>
+      <div class="msg" id="progMsg">…</div>
+    </div>
+  </div>
+
+  <!-- ── STEP 2: results ── -->
+  <div class="card" id="resultCard" style="display:none">
+    <h2><span class="step">2</span> ผลการเทียบ</h2>
+
+    <div class="verdict" id="verdict"></div>
+    <div class="summary" id="summary"></div>
+
+    <div class="toolbar">
+      <input type="search" id="filter" placeholder="กรองตามชื่อไฟล์ / โฟลเดอร์…" oninput="renderTable()">
+      <div class="tabs" id="tabs"></div>
+      <button class="btn btn-ghost" onclick="exportReport('csv')">⬇ CSV</button>
+      <button class="btn btn-ghost" onclick="exportReport('json')">⬇ JSON</button>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:44%">พาธ (relative)</th>
+            <th style="width:14%">สถานะ</th>
+            <th style="width:14%">ฝั่ง A</th>
+            <th style="width:14%">ฝั่ง B</th>
+            <th style="width:14%">หมายเหตุ</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── STEP 3: sync ── -->
+  <div class="card" id="syncCard" style="display:none">
+    <h2><span class="step">3</span> ทำให้สองฝั่งเท่ากัน</h2>
+
+    <div class="opts" style="border-top:none;padding-top:0;margin-top:0">
+      <label>ทิศทาง:
+        <select id="direction">
+          <option value="left_to_right" selected>A → B (คัดลอกจากฝั่ง A ไป B)</option>
+          <option value="right_to_left">B → A (คัดลอกจากฝั่ง B ไป A)</option>
+          <option value="bidirectional">สองทาง (ไฟล์ใหม่กว่าชนะ)</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="optVerify" checked> ตรวจ SHA-256 หลังคัดลอก</label>
+      <label><input type="checkbox" id="optBackup" checked> สำรองไฟล์เดิมก่อนทับ</label>
+      <label><input type="checkbox" id="optDelete"> ลบไฟล์ส่วนเกิน (อันตราย)</label>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-ghost" id="previewBtn" onclick="runSync(true)">👁 ดูตัวอย่าง (dry-run)</button>
+      <button class="btn btn-violet" id="execBtn" onclick="runSync(false)">⚡ คัดลอกจริง</button>
+    </div>
+
+    <div class="progress" id="syncProgress">
+      <div class="bar"><i id="syncBar"></i></div>
+      <div class="msg" id="syncMsg">…</div>
+    </div>
+
+    <div id="planOut" style="margin-top:14px;display:none">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px" id="planSummary"></div>
+      <div class="tablewrap" style="max-height:380px">
+        <table>
+          <thead><tr><th style="width:52%">รายการ</th><th style="width:16%">การทำงาน</th><th style="width:16%">ขนาด</th><th style="width:16%">ผล</th></tr></thead>
+          <tbody id="planBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="logWrap" style="margin-top:14px;display:none">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">บันทึกการทำงาน</div>
+      <div class="logbox" id="logBox"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Folder picker modal ── -->
+<div class="modal" id="browseModal">
+  <div class="box">
+    <div class="hd">
+      <h3 id="browseTitle">เลือกโฟลเดอร์</h3>
+      <button class="btn btn-ghost" onclick="closeBrowse()">ปิด</button>
+    </div>
+    <div class="bd">
+      <div id="volList" style="margin-bottom:14px"></div>
+      <div class="crumb" id="browseCrumb">/</div>
+      <div class="flist" id="browseList"></div>
+    </div>
+    <div class="ft">
+      <button class="btn btn-ghost" onclick="goParent()">⬆ ขึ้นระดับบน</button>
+      <button class="btn btn-primary" onclick="pickCurrent()">✓ เลือกโฟลเดอร์นี้</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Reports modal ── -->
+<div class="modal" id="reportsModal">
+  <div class="box">
+    <div class="hd">
+      <h3>ประวัติการสแกน</h3>
+      <button class="btn btn-ghost" onclick="closeReports()">ปิด</button>
+    </div>
+    <div class="bd"><div class="rlist" id="rlist"></div></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+/* ═══════════ STATE ═══════════ */
+const S = {
+  side: null,          // which side the picker is filling
+  browsePath: null,
+  report: null,        // current comparison report
+  jobPoll: null,
+  statusFilter: 'different',
+};
+
+const STATUS_LABEL = {
+  same:'เท่ากัน', left_only:'มีเฉพาะ A', right_only:'มีเฉพาะ B',
+  size_differs:'ขนาดต่าง', content_differs:'เนื้อหาต่าง',
+  mtime_differs:'เวลาแก้ไขต่าง', type_differs:'ชนิดต่าง', symlink_differs:'symlink ต่าง'
+};
+
+/* ═══════════ UTIL ═══════════ */
+function fmtBytes(n){
+  if(n === null || n === undefined || isNaN(n)) return '—';
+  n = Number(n);
+  if(n === 0) return '0 B';
+  const u = ['B','KB','MB','GB','TB','PB'];
+  const i = Math.floor(Math.log(Math.abs(n)) / Math.log(1024));
+  const v = n / Math.pow(1024, i);
+  return (v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)) + ' ' + u[i];
+}
+function fmtTime(ts){
+  if(!ts) return '—';
+  const d = new Date(ts * 1000);
+  const p = x => String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function toast(msg, kind){
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || '');
+  el.innerHTML = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
+function api(path, opts){
+  return fetch(path, opts).then(async r => {
+    const ct = r.headers.get('content-type') || '';
+    const data = ct.includes('json') ? await r.json() : await r.text();
+    if(!r.ok) throw Object.assign(new Error(data?.error || data || r.statusText), { payload: data, status: r.status });
+    return data;
+  });
+}
+
+/* ═══════════ HEALTH ═══════════ */
+async function health(){
+  const pill = document.getElementById('srvPill');
+  try {
+    const h = await api('/api/health');
+    pill.textContent = 'เซิร์ฟเวอร์ทำงาน (PID ' + h.pid + ')';
+    pill.className = 'pill ok';
+    loadState();
+    loadVolumesQuick();
+  } catch(e){
+    pill.textContent = 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้';
+    pill.className = 'pill bad';
+  }
+}
+
+async function loadState(){
+  try {
+    const st = await api('/api/state');
+    if(st.last_left)  document.getElementById('leftPath').value  = st.last_left;
+    if(st.last_right) document.getElementById('rightPath').value = st.last_right;
+    const o = st.last_options || {};
+    if(o.hash_mode) document.getElementById('hashMode').value = o.hash_mode;
+    if(typeof o.compare_mtime === 'boolean') document.getElementById('cmpMtime').checked = o.compare_mtime;
+    if(o.mtime_tolerance !== undefined) document.getElementById('mtimeTol').value = o.mtime_tolerance;
+    if(document.getElementById('leftPath').value)  checkAccess('left');
+    if(document.getElementById('rightPath').value) checkAccess('right');
+  } catch(e){ /* first run */ }
+}
+
+/* ═══════════ VOLUMES / ACCESS ═══════════ */
+let VOLUMES = [];
+async function loadVolumesQuick(){
+  try {
+    const data = await api('/api/volumes');
+    VOLUMES = data.volumes || [];
+    const rowL = document.querySelector('.side.left .row');
+    const rowR = document.querySelector('.side.right .row');
+    // remove old quick volume buttons
+    document.querySelectorAll('.quick.vol').forEach(b => b.remove());
+    VOLUMES.slice(0, 4).forEach(v => {
+      [rowL, rowR].forEach(row => {
+        const b = document.createElement('button');
+        b.className = 'quick vol';
+        b.textContent = '💾 ' + v.name.replace(' (system root)','');
+        b.onclick = () => {
+          const input = row.parentElement.querySelector('input');
+          input.value = v.path;
+          checkAccess(input.id === 'leftPath' ? 'left' : 'right');
+        };
+        row.appendChild(b);
+      });
+    });
+  } catch(e){}
+}
+
+async function checkAccess(side){
+  const path = document.getElementById(side + 'Path').value.trim();
+  const box = document.getElementById(side + 'Access');
+  if(!path){ box.className = 'access'; return; }
+
+  try {
+    const r = await api('/api/access?path=' + encodeURIComponent(path));
+    if(r.status === 'ok'){
+      box.className = 'access show ok';
+      box.innerHTML = `✓ เข้าถึงได้ — ${r.writable ? 'อ่าน/เขียน' : 'อ่านอย่างเดียว'}`;
+    } else if(r.status === 'permission_required'){
+      box.className = 'access show warn';
+      box.innerHTML = `🔐 ต้องขออนุญาตเข้าถึง<br><span style="font-size:11.5px">${esc(r.error || '')}</span>
+        <div style="margin-top:8px"><button class="btn btn-ghost" onclick="requestAccess('${side}')">ขออนุญาตตอนนี้</button></div>`;
+    } else {
+      box.className = 'access show bad';
+      box.innerHTML = `✕ ${esc(r.status)} — ${esc(r.error || '')}`;
+    }
+  } catch(e){
+    box.className = 'access show bad';
+    box.innerHTML = '✕ ' + esc(e.message);
+  }
+}
+
+async function requestAccess(side){
+  const path = document.getElementById(side + 'Path').value.trim();
+  try {
+    const r = await api('/api/access/request?path=' + encodeURIComponent(path));
+    if(r.status === 'ok'){
+      toast('✓ ได้รับอนุญาตแล้ว', 'ok');
+      checkAccess(side);
+      return;
+    }
+    const box = document.getElementById(side + 'Access');
+    box.className = 'access show warn';
+    box.innerHTML = `🔐 ต้องอนุญาตผ่าน System Settings<br>
+      <div style="font-size:11.5px;margin:6px 0;line-height:1.7">${esc(r.instructions || '')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        ${r.settings_url ? `<a class="btn btn-ghost" href="${esc(r.settings_url)}">เปิด System Settings</a>` : ''}
+        <button class="btn btn-ghost" onclick="checkAccess('${side}')">ตรวจสอบสิทธิ์อีกครั้ง</button>
+      </div>`;
+    toast('ต้องอนุญาตการเข้าถึงใน System Settings ก่อน', 'bad');
+  } catch(e){ toast('ผิดพลาด: ' + esc(e.message), 'bad'); }
+}
+
+/* ═══════════ BROWSE ═══════════ */
+async function browse(side){
+  S.side = side;
+  document.getElementById('browseTitle').textContent =
+    'เลือกโฟลเดอร์ — ฝั่ง ' + (side === 'left' ? 'A' : 'B');
+  const cur = document.getElementById(side + 'Path').value.trim();
+  document.getElementById('browseModal').classList.add('show');
+  await renderVolumes();
+  await loadDir(cur || '~');
+}
+function closeBrowse(){ document.getElementById('browseModal').classList.remove('show'); }
+
+async function renderVolumes(){
+  const box = document.getElementById('volList');
+  if(!VOLUMES.length){
+    try { VOLUMES = (await api('/api/volumes')).volumes || []; } catch(e){}
+  }
+  box.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:7px;text-transform:uppercase;letter-spacing:.5px">ไดรฟ์ / วอลุ่มที่เสียบอยู่</div>'
+    + '<div style="display:flex;gap:7px;flex-wrap:wrap">'
+    + VOLUMES.map(v => `<button class="quick" onclick="loadDir('${esc(v.path)}')">💾 ${esc(v.name)}${v.free_bytes?` · ว่าง ${fmtBytes(v.free_bytes)}`:''}</button>`).join('')
+    + '</div>';
+}
+
+async function loadDir(path){
+  try {
+    const r = await api('/api/browse?path=' + encodeURIComponent(path));
+    S.browsePath = r.path;
+    document.getElementById('browseCrumb').textContent = r.path;
+
+    if(r.access && r.access.status !== 'ok'){
+      document.getElementById('browseList').innerHTML =
+        `<div style="grid-column:1/-1;padding:16px;border-radius:10px;background:#f59e0b14;border:1px solid #f59e0b44;color:var(--warn)">
+          🔐 เข้าถึงไม่ได้: ${esc(r.access.error || r.access.status)}
+          <div style="margin-top:8px"><button class="btn btn-ghost" onclick="requestAccessFromBrowse('${esc(r.path)}')">ขออนุญาต</button></div>
+        </div>`;
+      return;
+    }
+
+    const dirs = r.entries.filter(e => e.is_dir);
+    const files = r.entries.filter(e => !e.is_dir);
+    let html = '';
+    if(r.parent && r.parent !== r.path){
+      html += `<div class="fitem" onclick="loadDir('${esc(r.parent)}')"><span class="ico">⬆</span><span class="nm">.. (ขึ้นระดับบน)</span></div>`;
+    }
+    html += dirs.map(d => `<div class="fitem" onclick="loadDir('${esc(d.path)}')">
+        <span class="ico">📁</span><span class="nm">${esc(d.name)}${d.is_link?' 🔗':''}</span></div>`).join('');
+    html += files.map(f => `<div class="fitem" style="opacity:.55;cursor:default">
+        <span class="ico">📄</span><span class="nm">${esc(f.name)}</span><span class="sz">${fmtBytes(f.size)}</span></div>`).join('');
+    if(!dirs.length && !files.length) html = '<div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--muted)">โฟลเดอร์ว่าง</div>';
+    document.getElementById('browseList').innerHTML = html;
+  } catch(e){
+    document.getElementById('browseList').innerHTML =
+      `<div style="grid-column:1/-1;padding:16px;color:var(--bad)">✕ ${esc(e.message)}</div>`;
+  }
+}
+
+async function requestAccessFromBrowse(path){
+  try {
+    const r = await api('/api/access/request?path=' + encodeURIComponent(path));
+    if(r.status === 'ok'){ toast('✓ ได้รับอนุญาตแล้ว','ok'); loadDir(path); }
+    else toast('ต้องอนุญาตใน System Settings: ' + esc(r.instructions || ''), 'bad');
+  } catch(e){ toast('ผิดพลาด: ' + esc(e.message), 'bad'); }
+}
+
+function goParent(){ if(S.browsePath) loadDir(S.browsePath.split('/').slice(0,-1).join('/') || '/'); }
+
+function pickCurrent(){
+  if(!S.browsePath) return;
+  document.getElementById(S.side + 'Path').value = S.browsePath;
+  closeBrowse();
+  checkAccess(S.side);
+  toast('เลือก: ' + esc(S.browsePath));
+}
+
+/* ═══════════ SCAN ═══════════ */
+async function startScan(){
+  const left  = document.getElementById('leftPath').value.trim();
+  const right = document.getElementById('rightPath').value.trim();
+  if(!left || !right){ toast('ต้องเลือกโฟลเดอร์ทั้งสองฝั่ง', 'bad'); return; }
+  if(left === right){ toast('ทั้งสองฝั่งเป็นโฟลเดอร์เดียวกัน', 'bad'); return; }
+
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = true; btn.textContent = 'กำลังสแกน…';
+  showProgress('progress', 0, 'เริ่มสแกน…');
+
+  try {
+    const { job_id } = await api('/api/compare', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        left, right,
+        options: {
+          hash_mode: document.getElementById('hashMode').value,
+          compare_mtime: document.getElementById('cmpMtime').checked,
+          mtime_tolerance: parseFloat(document.getElementById('mtimeTol').value) || 0,
+          follow_symlinks: document.getElementById('followLinks').checked
+        }
+      })
+    });
+    pollJob(job_id, async (job) => {
+      if(job.status === 'done'){
+        const r = await api('/api/report?id=' + job.result.report_id);
+        S.report = r;
+        renderResults();
+        btn.disabled = false; btn.textContent = '▶ สแกนและเทียบ';
+        hideProgress('progress');
+        const s = r.summary;
+        toast(s.identical
+          ? `✓ เหมือนกันทั้งหมด — ${s.same} ไฟล์`
+          : `พบความต่าง ${s.different} จาก ${s.total_items} ไฟล์`, s.identical ? 'ok' : '');
+      } else if(job.status === 'error'){
+        btn.disabled = false; btn.textContent = '▶ สแกนและเทียบ';
+        hideProgress('progress');
+        toast('สแกนไม่สำเร็จ: ' + esc(job.error), 'bad');
+      }
+    });
+  } catch(e){
+    btn.disabled = false; btn.textContent = '▶ สแกนและเทียบ';
+    hideProgress('progress');
+    toast('ผิดพลาด: ' + esc(e.message), 'bad');
+    if(e.payload?.access) {
+      const side = e.payload.side;
+      if(side) { document.getElementById(side + 'Access').className = 'access show warn';
+        document.getElementById(side + 'Access').innerHTML =
+          `🔐 ${esc(e.message)} <div style="margin-top:8px"><button class="btn btn-ghost" onclick="requestAccess('${side}')">ขออนุญาต</button></div>`; }
+    }
+  }
+}
+
+function showProgress(id, pct, msg){
+  const el = document.getElementById(id);
+  el.classList.add('show');
+  document.getElementById(id === 'progress' ? 'barFill' : 'syncBar').style.width = pct + '%';
+  document.getElementById(id === 'progress' ? 'progMsg' : 'syncMsg').textContent = msg;
+}
+function hideProgress(id){ document.getElementById(id).classList.remove('show'); }
+
+function pollJob(jobId, onTick){
+  if(S.jobPoll) clearInterval(S.jobPoll);
+  S.jobPoll = setInterval(async () => {
+    try {
+      const job = await api('/api/jobs?id=' + jobId);
+      const p = job.progress || {};
+      let msg = job.status;
+      let pct = 20;
+      if(p.phase === 'scan-left')  { msg = `สแกนฝั่ง A… ${p.files || 0} ไฟล์ · ${esc(p.current || '')}`; pct = 20 + Math.min(20, (p.files||0)/500); }
+      else if(p.phase === 'scan-right'){ msg = `สแกนฝั่ง B… ${p.files || 0} ไฟล์ · ${esc(p.current || '')}`; pct = 45 + Math.min(20, (p.files||0)/500); }
+      else if(p.phase === 'compare'){ msg = 'กำลังเทียบรายไฟล์…'; pct = 70; }
+      else if(p.total){ msg = `คัดลอก ${p.index}/${p.total} · ${esc(p.current || '')}`; pct = Math.round((p.index/p.total)*100); }
+
+      if(job.status === 'done') pct = 100;
+      if(document.getElementById('progress').classList.contains('show')) showProgress('progress', pct, msg);
+      if(document.getElementById('syncProgress').classList.contains('show')) showProgress('syncProgress', pct, msg);
+
+      if(job.status === 'done' || job.status === 'error'){
+        clearInterval(S.jobPoll); S.jobPoll = null;
+        onTick(job);
+      }
+    } catch(e){
+      clearInterval(S.jobPoll); S.jobPoll = null;
+    }
+  }, 600);
+}
+
+/* ═══════════ RENDER RESULTS ═══════════ */
+function renderResults(){
+  const r = S.report;
+  if(!r) return;
+  const s = r.summary;
+
+  document.getElementById('resultCard').style.display = '';
+  document.getElementById('syncCard').style.display = '';
+
+  // Verdict
+  const v = document.getElementById('verdict');
+  v.className = 'verdict show ' + (s.identical ? 'equal' : 'differ');
+  if(s.identical){
+    v.innerHTML = `✓ สองโฟลเดอร์เหมือนกันทั้งหมด — ${s.same.toLocaleString()} ไฟล์เท่ากัน ขนาดรวม ${fmtBytes(s.left_total_bytes)}`;
+  } else {
+    const bits = [];
+    if(s.left_only) bits.push(`มีเฉพาะฝั่ง A ${s.left_only} ไฟล์`);
+    if(s.right_only) bits.push(`มีเฉพาะฝั่ง B ${s.right_only} ไฟล์`);
+    if(s.size_differs) bits.push(`ขนาดต่าง ${s.size_differs}`);
+    if(s.content_differs) bits.push(`เนื้อหาต่าง ${s.content_differs}`);
+    if(s.mtime_differs) bits.push(`เวลาแก้ไขต่าง ${s.mtime_differs}`);
+    if(s.type_differs + s.symlink_differs) bits.push(`ชนิด/symlink ต่าง ${s.type_differs + s.symlink_differs}`);
+    if(s.dirs_only_left) bits.push(`โฟลเดอร์มีเฉพาะ A ${s.dirs_only_left}`);
+    if(s.dirs_only_right) bits.push(`โฟลเดอร์มีเฉพาะ B ${s.dirs_only_right}`);
+    v.innerHTML = `⚠ พบความต่าง ${s.different.toLocaleString()} จาก ${s.total_items.toLocaleString()} รายการ
+      <div class="detail">
+        ${bits.join(' · ')}<br>
+        ขนาดรวม ฝั่ง A: <b>${fmtBytes(s.left_total_bytes)}</b> (${s.left_file_count.toLocaleString()} ไฟล์) ·
+        ฝั่ง B: <b>${fmtBytes(s.right_total_bytes)}</b> (${s.right_file_count.toLocaleString()} ไฟล์)
+        ${s.sizes_equal ? '<br>ขนาดรวมทั้งสองฝั่ง<b>เท่ากัน</b>' : '<br>ขนาดรวมต่างกัน ' + fmtBytes(Math.abs(s.left_total_bytes - s.right_total_bytes))}
+      </div>`;
+  }
+
+  // Summary cards
+  document.getElementById('summary').className = 'summary show';
+  document.getElementById('summary').innerHTML = `
+    <div class="stat same"><div class="n">${s.same.toLocaleString()}</div><div class="l">ไฟล์เท่ากัน</div></div>
+    <div class="stat diff"><div class="n">${s.different.toLocaleString()}</div><div class="l">ไฟล์ต่างกัน</div></div>
+    <div class="stat only"><div class="n">${s.left_only.toLocaleString()} / ${s.right_only.toLocaleString()}</div><div class="l">เฉพาะ A / เฉพาะ B</div></div>
+    <div class="stat"><div class="n" style="color:var(--muted)">${s.left_file_count.toLocaleString()} / ${s.right_file_count.toLocaleString()}</div><div class="l">จำนวนไฟล์ A / B</div></div>
+    <div class="stat bytes"><div class="n">${fmtBytes(s.left_total_bytes)}</div><div class="l">ขนาดรวมฝั่ง A</div></div>
+    <div class="stat bytes"><div class="n">${fmtBytes(s.right_total_bytes)}</div><div class="l">ขนาดรวมฝั่ง B</div></div>
+  `;
+
+  // Tabs
+  const counts = { all: s.total_items, different: s.different, same: s.same,
+    left_only: s.left_only, right_only: s.right_only, size_differs: s.size_differs,
+    content_differs: s.content_differs, mtime_differs: s.mtime_differs };
+  document.getElementById('tabs').innerHTML = Object.entries(counts).map(([k, n]) =>
+    `<div class="tab ${S.statusFilter===k?'active':''}" onclick="setFilter('${k}')">${k==='all'?'ทั้งหมด':STATUS_LABEL[k]||k}<span class="c">${n}</span></div>`
+  ).join('');
+
+  renderTable();
+  if(r.left_errors?.length || r.right_errors?.length){
+    toast(`⚠ มี ${(r.left_errors?.length||0)+(r.right_errors?.length||0)} รายการที่อ่านไม่ได้ (สิทธิ์/ถูกล็อก)`, 'bad');
+  }
+}
+
+function setFilter(k){ S.statusFilter = k; renderResults(); }
+
+function renderTable(){
+  const r = S.report;
+  if(!r) return;
+  const q = (document.getElementById('filter').value || '').toLowerCase();
+  const rows = r.items.filter(it => {
+    if(S.statusFilter === 'different' && it.status === 'same') return false;
+    if(S.statusFilter === 'all') { /* keep */ }
+    else if(S.statusFilter !== 'different' && it.status !== S.statusFilter) return false;
+    if(q && !it.relpath.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const tbody = document.getElementById('tbody');
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">ไม่มีรายการตามเงื่อนไข</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.slice(0, 4000).map(it => {
+    const lf = it.left || {}, rf = it.right || {};
+    const dir = it.relpath.includes('/') ? it.relpath.slice(0, it.relpath.lastIndexOf('/')+1) : '';
+    const name = it.relpath.slice(dir.length);
+    const sizeCls = (lf.size !== undefined && rf.size !== undefined && lf.size !== rf.size) ? 'sz diff' : 'sz';
+    const reasons = (it.reasons || []).join(', ');
+    return `<tr>
+      <td class="path"><span class="dir">${esc(dir)}</span>${esc(name)}${it.hashed ? ' <span style="color:var(--cyan);font-size:10px">#</span>' : ''}</td>
+      <td><span class="badge ${it.status}">${STATUS_LABEL[it.status] || it.status}</span></td>
+      <td class="${sizeCls}">${lf.size !== undefined ? fmtBytes(lf.size) : '—'}<br><span style="font-size:10px;opacity:.7">${fmtTime(lf.mtime)}</span></td>
+      <td class="${sizeCls}">${rf.size !== undefined ? fmtBytes(rf.size) : '—'}<br><span style="font-size:10px;opacity:.7">${fmtTime(rf.mtime)}</span></td>
+      <td style="font-size:11px;color:var(--muted)">${esc(reasons)}</td>
+    </tr>`;
+  }).join('');
+  if(rows.length > 4000){
+    tbody.innerHTML += `<tr><td colspan="5" class="empty">แสดง 4,000 จาก ${rows.length.toLocaleString()} รายการ — ใช้ตัวกรองหรือ export CSV</td></tr>`;
+  }
+}
+
+/* ═══════════ SYNC ═══════════ */
+async function runSync(dryRun){
+  if(!S.report){ toast('ต้องสแกนก่อน', 'bad'); return; }
+  const direction = document.getElementById('direction').value;
+  const deleteExtras = document.getElementById('optDelete').checked;
+
+  if(!dryRun && deleteExtras && !confirm('ยืนยัน: จะลบไฟล์ส่วนเกินในฝั่งปลายทางถาวร (มีสำรองถ้าเปิด backup) — ดำเนินการต่อ?')) return;
+  if(!dryRun && !confirm('ยืนยันคัดลอกจริง: ' + direction + ' ?')) return;
+
+  const btn = dryRun ? document.getElementById('previewBtn') : document.getElementById('execBtn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'กำลังทำงาน…';
+  showProgress('syncProgress', 0, 'เตรียมแผน…');
+  document.getElementById('logWrap').style.display = '';
+
+  try {
+    const { job_id } = await api('/api/sync', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        report_id: S.report.id,
+        direction,
+        dry_run: dryRun,
+        confirm: !dryRun,
+        verify: document.getElementById('optVerify').checked,
+        backup: document.getElementById('optBackup').checked,
+        delete_extras: deleteExtras
+      })
+    });
+    pollJob(job_id, async (job) => {
+      btn.disabled = false; btn.textContent = orig;
+      hideProgress('syncProgress');
+      if(job.status === 'done'){
+        renderPlan(job.result);
+        document.getElementById('logBox').textContent = (job.log || []).join('\n');
+        const s = job.result.summary;
+        toast(dryRun
+          ? `ตัวอย่าง: ต้องคัดลอก ${s.copied || job.result.summary.total} รายการ (${fmtBytes(s.bytes_to_copy || 0)})`
+          : (s.ok ? `✓ คัดลอกสำเร็จ ${s.copied} ไฟล์ (${fmtBytes(s.copied_bytes)})` : `เสร็จแต่มีข้อผิดพลาด ${s.failed} รายการ`),
+          s.failed ? 'bad' : 'ok');
+      } else {
+        toast('ผิดพลาด: ' + esc(job.error), 'bad');
+        document.getElementById('logBox').textContent = (job.log || []).join('\n');
+      }
+    });
+  } catch(e){
+    btn.disabled = false; btn.textContent = orig;
+    hideProgress('syncProgress');
+    toast('ผิดพลาด: ' + esc(e.message), 'bad');
+  }
+}
+
+function renderPlan(result){
+  const box = document.getElementById('planOut');
+  box.style.display = '';
+  const s = result.summary;
+  document.getElementById('planSummary').innerHTML =
+    `${result.dry_run ? '<b style="color:var(--warn)">โหมดตัวอย่าง (dry-run)</b> — ' : '<b style="color:var(--ok)">คัดลอกจริงแล้ว</b> — '}
+     ทั้งหมด ${s.total} รายการ · คัดลอก ${s.copied} · ลบ ${s.deleted} · ล้มเหลว ${s.failed} · ${fmtBytes(s.copied_bytes || s.bytes_to_copy || 0)}
+     ${result.backup_root ? `<br>สำรองไฟล์เดิมไว้ที่: <span style="font-family:ui-monospace,monospace">${esc(result.backup_root)}</span>` : ''}`;
+
+  const ACT = {copy:'คัดลอก', mkdir:'สร้างโฟลเดอร์', delete:'ลบ', symlink:'สร้าง symlink'};
+  document.getElementById('planBody').innerHTML = result.results.slice(0, 2000).map(r => {
+    const dir = r.relpath && r.relpath.includes('/') ? r.relpath.slice(0, r.relpath.lastIndexOf('/')+1) : '';
+    const name = r.relpath ? r.relpath.slice(dir.length) : '';
+    return `<tr>
+      <td class="path"><span class="dir">${esc(dir)}</span>${esc(name)}</td>
+      <td style="font-size:12px">${ACT[r.action] || r.action}</td>
+      <td class="sz">${fmtBytes(r.bytes)}</td>
+      <td style="font-size:11.5px;color:${r.ok ? 'var(--ok)' : 'var(--bad)'}">${r.ok ? '✓ ' + esc(r.detail || '') : '✕ ' + esc(r.error || '')}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ═══════════ EXPORT / REPORTS ═══════════ */
+function exportReport(fmt){
+  if(!S.report) return;
+  window.location = `/api/report/${S.report.id}/export?format=${fmt}`;
+}
+
+async function openReports(){
+  document.getElementById('reportsModal').classList.add('show');
+  try {
+    const { reports } = await api('/api/reports');
+    const el = document.getElementById('rlist');
+    if(!reports.length){ el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--muted)">ยังไม่มีประวัติ</div>'; return; }
+    el.innerHTML = reports.map(r => {
+      const s = r.summary || {};
+      return `<div class="ritem" onclick="loadReport('${r.id}')">
+        <div class="rpaths">
+          <div class="t">${esc(r.generated_at || '')}</div>
+          <div>A: ${esc(r.left || '')}</div>
+          <div>B: ${esc(r.right || '')}</div>
+        </div>
+        <div style="text-align:right;font-size:11.5px;color:var(--muted);flex-shrink:0">
+          <div style="color:${s.identical ? 'var(--ok)' : 'var(--warn)'};font-weight:700">${s.identical ? 'เท่ากัน' : (s.different || 0) + ' ต่าง'}</div>
+          <div>${(s.total_items||0).toLocaleString()} รายการ</div>
+        </div>
+        <button class="btn btn-ghost" onclick="event.stopPropagation();delReport('${r.id}')" style="padding:5px 10px">ลบ</button>
+      </div>`;
+    }).join('');
+  } catch(e){ toast('โหลดประวัติไม่ได้: ' + esc(e.message), 'bad'); }
+}
+function closeReports(){ document.getElementById('reportsModal').classList.remove('show'); }
+
+async function loadReport(id){
+  try {
+    S.report = await api('/api/report?id=' + id);
+    document.getElementById('leftPath').value = S.report.left.root;
+    document.getElementById('rightPath').value = S.report.right.root;
+    renderResults();
+    closeReports();
+    document.getElementById('resultCard').scrollIntoView({behavior:'smooth'});
+    toast('โหลดผลการสแกนแล้ว');
+  } catch(e){ toast('โหลดไม่ได้: ' + esc(e.message), 'bad'); }
+}
+
+async function delReport(id){
+  if(!confirm('ลบผลการสแกนนี้?')) return;
+  try { await api('/api/report?id=' + id, { method:'DELETE' }); openReports(); toast('ลบแล้ว'); }
+  catch(e){ toast('ลบไม่ได้: ' + esc(e.message), 'bad'); }
+}
+
+/* ═══════════ MISC ═══════════ */
+function swapSides(){
+  const l = document.getElementById('leftPath'), r = document.getElementById('rightPath');
+  [l.value, r.value] = [r.value, l.value];
+  checkAccess('left'); checkAccess('right');
+}
+function clearAll(){
+  S.report = null;
+  document.getElementById('resultCard').style.display = 'none';
+  document.getElementById('syncCard').style.display = 'none';
+  document.getElementById('planOut').style.display = 'none';
+  document.getElementById('logWrap').style.display = 'none';
+}
+
+document.getElementById('leftPath').addEventListener('change', () => checkAccess('left'));
+document.getElementById('rightPath').addEventListener('change', () => checkAccess('right'));
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape'){ closeBrowse(); closeReports(); }
+});
+
+health();
+</script>
+</body>
+</html>
