@@ -24,10 +24,19 @@ __all__ = [
 
 IS_MAC = platform.system() == "Darwin"
 
+# Real macOS System Settings privacy anchors (Ventura+). "Removable Volumes" is a
+# sub-permission under Files and Folders, not its own pane, so it maps there too.
 SYSTEM_SETTINGS_URLS = {
     "full_disk_access": "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
     "files_and_folders": "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders",
-    "removable_volumes": "x-apple.systempreferences:com.apple.preference.security?Privacy_RemovableVolumes",
+    "removable_volumes": "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders",
+}
+
+# Human-readable pane name per hint.
+PANE_NAMES = {
+    "full_disk_access": "Full Disk Access",
+    "files_and_folders": "Files and Folders",
+    "removable_volumes": "Files and Folders → Removable Volumes",
 }
 
 # Folders macOS protects per-app; we surface them as known permission targets.
@@ -184,13 +193,10 @@ def request_access(path: str) -> dict[str, Any]:
     if probe["status"] == "permission_required":
         hint = probe.get("hint") or "full_disk_access"
         probe["settings_url"] = SYSTEM_SETTINGS_URLS.get(hint)
+        probe["pane"] = PANE_NAMES.get(hint, "Full Disk Access")
         probe["instructions"] = (
             "เปิด System Settings → Privacy & Security → "
-            + {
-                "full_disk_access": "Full Disk Access",
-                "files_and_folders": "Files and Folders",
-                "removable_volumes": "Files and Folders (Removable Volumes)",
-            }.get(hint, "Full Disk Access")
+            + probe["pane"]
             + " แล้วเพิ่ม Terminal (หรือแอปที่รัน FDVS) จากนั้นกด 'ตรวจสอบสิทธิ์อีกครั้ง'"
         )
         probe["settings_commands"] = {
