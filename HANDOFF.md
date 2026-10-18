@@ -177,3 +177,25 @@ t0=time.time(); compare_trees(L,R,hash_mode='all'); act=time.time()-t0
 print('pred',est['seconds']['total'],'actual',round(act,2),'ratio',round(act/est['seconds']['total'],2))
 "
 ```
+
+---
+
+## Backup migration — 2026-10-18 14:40 +07
+
+ย้าย backup ของ MNG Dashboard จากที่กระจัดกระจาย 3 ที่ → `/Volumes/MNG/Home_Backup/MNG-Dashboard/`
+
+| จาก | ไป | จำนวน |
+|---|---|---|
+| `/Volumes/MNG/index.html.bak*` (top level) | `top-level/` | 11 |
+| `/Volumes/MNG/.backup/` (ไฟล์) | `dot-backup/` | 49 |
+| `/Volumes/MNG/.backup/*/` (snapshot) | `dot-backup/snapshots/` | 20 |
+| `/Volumes/MNG/Backup/index.html.*` | `Backup-folder/` | 12 |
+| `/Volumes/MNG/Backup/tmp/` | `Backup-folder/tmp/` | 3 |
+
+- **63 รายการ · 1,626,815 ไบต์** · ทุกไฟล์ verify SHA-256 ก่อนลบต้นทาง
+- ลบ container ว่างแล้ว: `.backup/`, `Backup/tmp/`
+- **ไม่ย้าย:** `Backup/vulcananti-scale.com.*` (เว็บลูกค้า) · `Backup/revslider*.zip` (ปลั๊กอิน)
+- ไฟล์ประกอบใน `Home_Backup/MNG-Dashboard/`: `README.md`, `MIGRATION-MANIFEST.json`, `rollback.sh`
+- สคริปต์: `scripts/migrate_backups.py`
+
+**กฎใหม่: สำรอง index.html ไปที่ `Home_Backup/MNG-Dashboard/top-level/` เสมอ**
