@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .compare import DEFAULT_IGNORE_GLOBS, DEFAULT_IGNORES, compare_trees
+from .compare import DEFAULT_IGNORE_GLOBS, DEFAULT_IGNORES, compare_trees, estimate_scan
 from .sync import PlanError, execute_plan, plan_sync
 from .volumes import SYSTEM_SETTINGS_URLS, list_dir, list_volumes, probe_access, request_access
 
@@ -37,6 +37,8 @@ REPORTS_DIR = os.path.join(ROOT_DIR, "reports")
 STATE_FILE = os.path.join(ROOT_DIR, ".fdvs-state.json")
 DEFAULT_PORT = 4477
 MAX_BODY = 8 * 1024 * 1024
+
+__version__ = "2.0.0"
 
 # ─── In-memory job registry (single-user local tool) ────────────────────────
 JOBS: dict[str, dict] = {}
@@ -203,7 +205,7 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if path == "/api/health":
-                return self._json({"ok": True, "app": "FDVS", "version": "1.0.0", "pid": os.getpid()})
+                return self._json({"ok": True, "app": "FDVS", "version": __version__, "pid": os.getpid()})
 
             if path == "/api/volumes":
                 return self._json(list_volumes())
@@ -227,6 +229,30 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/access/settings-urls":
                 return self._json(SYSTEM_SETTINGS_URLS)
+
+            if path == "/api/estimate":
+                left = (query.get("left") or [""])[0]
+                right = (query.get("right") or [""])[0]
+                if not left or not right:
+                    return self._error("ต้องระบุ folder ทั้งสองฝั่ง")
+                for side, p in (("left", left), ("right", right)):
+                    access = probe_access(p)
+                    if access["status"] != "ok":
+                        return self._error(
+                            f"เข้าถึง folder ฝั่ง {side} ไม่ได้: {access.get('error')}",
+                            403,
+                            access=access,
+                            side=side,
+                        )
+                est = estimate_scan(
+                    left,
+                    right,
+                    hash_mode=(query.get("hash_mode") or ["auto"])[0],
+                    compare_mtime=(query.get("compare_mtime") or ["1"])[0] not in ("0", "false"),
+                    follow_symlinks=(query.get("follow_symlinks") or ["0"])[0] in ("1", "true"),
+                    budget_s=float((query.get("budget_s") or ["8"])[0]),
+                )
+                return self._json(est)
 
             if path == "/api/state":
                 return self._json(load_state())

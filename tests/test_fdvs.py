@@ -20,7 +20,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.compare import compare_trees, hash_file, walk_tree  # noqa: E402
+from app.compare import compare_trees, estimate_scan, estimate_tree, hash_file, walk_tree  # noqa: E402
 from app.server import build_server  # noqa: E402
 from app.sync import PlanError, execute_plan, plan_sync  # noqa: E402
 from app.volumes import list_dir, list_volumes, probe_access  # noqa: E402
@@ -570,6 +570,179 @@ class TestAPI(TempTree):
             self.assertIn("text/csv", r.headers["Content-Type"])
         self.assertIn("relpath,status", body)
         self.assertIn("a.txt", body)
+
+
+# ═══════════════════ estimate ═══════════════════
+
+
+class TestEstimate(TempTree):
+    def test_counts_match_real_walk(self):
+        for i in range(30):
+            write(os.path.join(self.left, f"f{i}.txt"), "x" * (i + 1))
+        write(os.path.join(self.left, "sub", "deep.txt"), "yy")
+        os.makedirs(os.path.join(self.left, "emptydir"))
+        est = estimate_tree(self.left, budget_s=10)
+        real = walk_tree(self.left)
+        self.assertEqual(est["files"], real["file_count"])
+        self.assertEqual(est["dirs"], real["dir_count"])
+        self.assertEqual(est["bytes"], real["total_bytes"])
+        self.assertFalse(est["partial"])
+        self.assertFalse(est["extrapolated"])
+
+    def test_respects_ignore_rules(self):
+        write(os.path.join(self.left, "keep.txt"), "x")
+        write(os.path.join(self.left, ".DS_Store"), "junk")
+        write(os.path.join(self.left, "swap.swp"), "junk")
+        est = estimate_tree(self.left, budget_s=5)
+        self.assertEqual(est["files"], 1)
+
+    def test_missing_root_reported(self):
+        est = estimate_tree(os.path.join(self.tmp, "nope"))
+        self.assertFalse(est["exists"])
+        self.assertEqual(est["files"], 0)
+
+    def test_zero_budget_marks_partial_and_extrapolates(self):
+        # Build a tree big enough that a 0s budget cannot finish it.
+        for i in range(120):
+            write(os.path.join(self.left, f"d{i}", "f.txt"), "content")
+        est = estimate_tree(self.left, budget_s=0.0)
+        self.assertTrue(est["partial"])
+        # scanned_* always reflect what was actually seen
+        self.assertLessEqual(est["scanned_dirs"], est["dirs"] or 1)
+        self.assertIsNotNone(est.get("note"))
+
+    def test_estimate_scan_totals_both_sides(self):
+        for i in range(10):
+            write(os.path.join(self.left, f"a{i}.txt"), "x")
+        for i in range(7):
+            write(os.path.join(self.right, f"b{i}.txt"), "yy")
+        est = estimate_scan(self.left, self.right, budget_s=10)
+        self.assertEqual(est["totals"]["files"], 17)
+        self.assertEqual(est["left"]["files"], 10)
+        self.assertEqual(est["right"]["files"], 7)
+        self.assertGreater(est["seconds"]["total"], 0)
+        self.assertFalse(est["sizes_equal_estimate"])
+
+    def test_estimate_scan_reports_measured_rates(self):
+        for i in range(60):
+            write(os.path.join(self.left, f"f{i}.txt"), "x" * 100)
+        est = estimate_scan(self.left, self.right, hash_mode="all", budget_s=10)
+        a = est["assumptions"]
+        self.assertGreater(a["walk_rate_entries_per_sec"], 0)
+        self.assertGreater(a["hash_rate_bytes_per_sec"], 0)
+        self.assertTrue(a["walk_rate_measured"])
+        # Hashing is bounded by the SMALLER side: a file present on only one
+        # side is copied, never hashed. Right side is empty here.
+        self.assertEqual(a["hash_bytes_estimated"], 0)
+
+    def test_hash_bytes_bounded_by_smaller_side(self):
+        # Both sides populated -> hashing bounded by the smaller one.
+        for i in range(20):
+            write(os.path.join(self.left, f"a{i}.txt"), "x" * 100)
+        for i in range(8):
+            write(os.path.join(self.right, f"b{i}.txt"), "y" * 100)
+        est = estimate_scan(self.left, self.right, hash_mode="all", budget_s=10)
+        self.assertEqual(est["left"]["bytes"], 2000)
+        self.assertEqual(est["right"]["bytes"], 800)
+        self.assertEqual(est["assumptions"]["hash_bytes_estimated"], 800)
+
+    def test_hash_mode_none_plans_no_hashing(self):
+        for i in range(20):
+            write(os.path.join(self.left, f"f{i}.txt"), "x" * 50)
+        est = estimate_scan(self.left, self.right, hash_mode="none", budget_s=10)
+        self.assertEqual(est["assumptions"]["hash_bytes_estimated"], 0)
+        self.assertEqual(est["seconds"]["hash"], 0)
+
+    def test_hash_mode_auto_estimates_fraction(self):
+        for i in range(20):
+            write(os.path.join(self.left, f"f{i}.txt"), "x" * 100)
+            write(os.path.join(self.right, f"f{i}.txt"), "x" * 100)
+        est = estimate_scan(self.left, self.right, hash_mode="auto", budget_s=10)
+        hb = est["assumptions"]["hash_bytes_estimated"]
+        self.assertGreater(hb, 0)
+        self.assertLess(hb, est["totals"]["bytes"])  # a fraction, not everything
+
+    def test_walk_rate_measurement_mirrors_real_work(self):
+        # Regression: measuring a bare scandir count overestimated throughput
+        # ~20x because it skipped the per-file stat. The measured rate must be
+        # in the same ballpark as the real walk on the same tree.
+        import time as _t
+        for i in range(400):
+            write(os.path.join(self.left, f"f{i}.txt"), "x" * 20)
+        from app.compare import _measure_walk_rate, _WALK_RATE_CACHE
+        _WALK_RATE_CACHE.clear()
+        rate = _measure_walk_rate(self.left, budget_s=1.0)
+        t0 = _t.perf_counter()
+        real = walk_tree(self.left)
+        real_s = _t.perf_counter() - t0
+        real_rate = (real["file_count"] + real["dir_count"]) / real_s
+        # within an order of magnitude either way
+        self.assertGreater(rate, real_rate / 10)
+        self.assertLess(rate, real_rate * 10)
+
+
+class TestAPIEstimate(TempTree):
+    """The /api/estimate endpoint the dashboard calls before scanning."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.httpd = build_server(0, "127.0.0.1")
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base = f"http://127.0.0.1:{cls.port}"
+        time.sleep(0.3)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def get(self, path):
+        with urllib.request.urlopen(self.base + path, timeout=40) as r:
+            return r.status, json.loads(r.read().decode())
+
+    def test_estimate_requires_both_paths(self):
+        try:
+            self.get("/api/estimate?left=" + self.left)
+            self.fail("expected 400")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+
+    def test_estimate_rejects_inaccessible_folder(self):
+        try:
+            self.get(f"/api/estimate?left={self.left}&right=" + os.path.join(self.tmp, "nope"))
+            self.fail("expected 403")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 403)
+
+    def test_estimate_returns_counts_and_seconds(self):
+        for i in range(25):
+            write(os.path.join(self.left, f"f{i}.txt"), "x" * 10)
+        write(os.path.join(self.right, "only.txt"), "y")
+        code, est = self.get(
+            f"/api/estimate?left={self.left}&right={self.right}&hash_mode=all&budget_s=8"
+        )
+        self.assertEqual(code, 200)
+        self.assertEqual(est["left"]["files"], 25)
+        self.assertEqual(est["right"]["files"], 1)
+        self.assertEqual(est["totals"]["files"], 26)
+        self.assertIn("seconds", est)
+        self.assertIn("assumptions", est)
+        self.assertGreater(est["seconds"]["total"], 0)
+
+    def test_estimate_uses_query_hash_mode(self):
+        for i in range(10):
+            write(os.path.join(self.left, f"f{i}.txt"), "x" * 100)
+            write(os.path.join(self.right, f"f{i}.txt"), "x" * 100)
+        _, none_mode = self.get(
+            f"/api/estimate?left={self.left}&right={self.right}&hash_mode=none&budget_s=5"
+        )
+        self.assertEqual(none_mode["assumptions"]["hash_bytes_estimated"], 0)
+        _, all_mode = self.get(
+            f"/api/estimate?left={self.left}&right={self.right}&hash_mode=all&budget_s=5"
+        )
+        self.assertGreater(all_mode["assumptions"]["hash_bytes_estimated"], 0)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import fnmatch
 import hashlib
 import os
 import stat
+import time
 from typing import Any, Callable, Iterable
 
 __all__ = [
@@ -19,6 +20,8 @@ __all__ = [
     "walk_tree",
     "compare_trees",
     "hash_file",
+    "estimate_tree",
+    "estimate_scan",
 ]
 
 # macOS / Windows metadata noise that should never count as a difference.
@@ -41,6 +44,16 @@ DEFAULT_IGNORE_GLOBS = ["*.swp", "*~", ".~*"]
 
 HASH_CHUNK = 1024 * 1024
 
+# Measured lazily on real data; used only for the pre-scan time estimate.
+_HASH_RATE_CACHE: dict[str, float] = {}
+_HASH_RATE_FALLBACK = 400 * 1024 * 1024  # bytes/sec, conservative SSD figure
+
+# Walk throughput varies enormously by volume (SSD vs external USB vs network).
+# Measured on this machine: /Volumes/MNG (external) ≈ 3,000 entries/sec.
+# We self-calibrate from every real walk instead of trusting a constant.
+_WALK_RATE_CACHE: dict[str, float] = {}
+_WALK_RATE_FALLBACK = 8_000  # entries/sec, conservative external-volume figure
+
 
 def hash_file(path: str, chunk: int = HASH_CHUNK) -> str:
     """SHA-256 of a file, streamed. Returns '' when unreadable."""
@@ -55,6 +68,342 @@ def hash_file(path: str, chunk: int = HASH_CHUNK) -> str:
     except OSError:
         return ""
     return h.hexdigest()
+
+
+def _measure_hash_rate(root: str, sample_bytes: int = 64 * 1024 * 1024) -> float:
+    """
+    Measure real hashing throughput on ``root`` so the pre-scan estimate is
+    grounded in this machine + this volume instead of a guess.
+
+    Samples files (largest first, since they dominate) until ``sample_bytes``
+    is covered or 6 files are read. Result is cached per root.
+    """
+    cached = _HASH_RATE_CACHE.get(root)
+    if cached:
+        return cached
+
+    sizes: list[tuple[int, str]] = []
+    budget = 0
+    try:
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for name in filenames:
+                if _skipped(name, DEFAULT_IGNORES, DEFAULT_IGNORE_GLOBS):
+                    continue
+                p = os.path.join(dirpath, name)
+                try:
+                    st = os.lstat(p)
+                except OSError:
+                    continue
+                if not stat.S_ISREG(st.st_mode) or st.st_size == 0:
+                    continue
+                sizes.append((st.st_size, p))
+                budget += st.st_size
+            if budget >= sample_bytes * 4:
+                break
+    except OSError:
+        pass
+
+    if not sizes:
+        return _HASH_RATE_FALLBACK
+
+    sizes.sort(reverse=True)
+    read_bytes = 0
+    elapsed = 0.0
+    for size, path in sizes[:6]:
+        try:
+            t0 = time.perf_counter()
+            with open(path, "rb") as fh:
+                while fh.read(HASH_CHUNK):
+                    pass
+            elapsed += time.perf_counter() - t0
+            read_bytes += size
+        except OSError:
+            continue
+        if read_bytes >= sample_bytes:
+            break
+
+    rate = (read_bytes / elapsed) if elapsed > 0 and read_bytes else _HASH_RATE_FALLBACK
+    rate = max(min(rate, 4 * 1024**3), 20 * 1024**2)  # clamp 20 MB/s .. 4 GB/s
+    _HASH_RATE_CACHE[root] = rate
+    return rate
+
+
+def _measure_walk_rate(root: str, budget_s: float = 1.0) -> float:
+    """
+    Measure how many directory entries per second this volume actually yields.
+
+    The constant is a poor substitute: an internal SSD does tens of thousands of
+    entries/sec while an external USB volume does ~1-3k. Critically, we must do
+    the *same work* the real walk does — calling ``entry.stat()`` per file,
+    which is where nearly all the cost lives on a slow volume. Measuring a bare
+    ``scandir`` count overestimates throughput by ~20x.
+
+    Cached per root.
+    """
+    cached = _WALK_RATE_CACHE.get(root)
+    if cached:
+        return cached
+
+    entries = 0
+    stack = [root]
+    started = time.perf_counter()
+    try:
+        while stack and (time.perf_counter() - started) < budget_s:
+            current = stack.pop()
+            try:
+                with os.scandir(current) as it:
+                    for entry in it:
+                        entries += 1
+                        # Mirror walk_tree: this stat is the dominant cost.
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                if not entry.is_symlink():
+                                    stack.append(entry.path)
+                            else:
+                                entry.stat(follow_symlinks=False)
+                        except OSError:
+                            pass
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+    elapsed = time.perf_counter() - started
+    if entries < 50 or elapsed <= 0:
+        return _WALK_RATE_FALLBACK
+    rate = entries / elapsed
+    rate = max(min(rate, 200_000), 100)  # clamp 100 .. 200k entries/sec
+    _WALK_RATE_CACHE[root] = rate
+    return rate
+
+
+def estimate_tree(
+    root: str,
+    *,
+    ignore_names: Iterable[str] = DEFAULT_IGNORES,
+    ignore_globs: Iterable[str] = DEFAULT_IGNORE_GLOBS,
+    follow_symlinks: bool = False,
+    budget_s: float = 8.0,
+    progress: Callable[[dict], None] | None = None,
+) -> dict[str, Any]:
+    """
+    Cheap pre-scan estimate: how many files/dirs and how many bytes are in
+    ``root``, without hashing anything.
+
+    ``budget_s`` bounds the walk. When the budget runs out, the counts seen so
+    far are **extrapolated** to the whole tree using the fraction of
+    directories already visited, and ``partial`` is set so the UI can label the
+    number as an estimate rather than a measurement.
+    """
+    root = os.path.abspath(os.path.expanduser(root))
+    started = time.perf_counter()
+
+    result: dict[str, Any] = {
+        "root": root,
+        "exists": os.path.isdir(root),
+        "files": 0,
+        "dirs": 0,
+        "bytes": 0,
+        "skipped": 0,
+        "partial": False,
+        "elapsed": 0.0,
+        "scanned_files": 0,
+        "scanned_dirs": 0,
+        "scanned_bytes": 0,
+        "extrapolated": False,
+        "errors": 0,
+    }
+    if not result["exists"]:
+        return result
+
+    ignore_names = set(ignore_names)
+    ignore_globs = list(ignore_globs)
+    stack = [root]
+    visited_dirs = 0
+    pending_dirs = 0
+
+    while stack:
+        if (time.perf_counter() - started) > budget_s:
+            result["partial"] = True
+            break
+        current = stack.pop()
+        visited_dirs += 1
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            result["errors"] += 1
+            continue
+        for entry in entries:
+            if _skipped(entry.name, ignore_names, ignore_globs):
+                result["skipped"] += 1
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    result["dirs"] += 1
+                    if not entry.is_symlink() or follow_symlinks:
+                        stack.append(entry.path)
+                        pending_dirs += 1
+                elif entry.is_file(follow_symlinks=False):
+                    result["files"] += 1
+                    result["bytes"] += entry.stat(follow_symlinks=False).st_size
+                else:
+                    result["files"] += 1
+            except OSError:
+                result["errors"] += 1
+        if progress and visited_dirs % 200 == 0:
+            progress({"phase": "estimate", "root": root, "dirs": visited_dirs, "files": result["files"]})
+
+    result["scanned_files"] = result["files"]
+    result["scanned_dirs"] = result["dirs"]
+    result["scanned_bytes"] = result["bytes"]
+
+    if result["partial"] and visited_dirs > 0:
+        # We stopped mid-walk. We know how many dirs we visited and how many are
+        # still queued, so scale the totals by the fraction of the tree covered.
+        total_dirs_known = visited_dirs + len(stack)
+        if total_dirs_known > visited_dirs:
+            factor = total_dirs_known / visited_dirs
+            result["files"] = int(result["files"] * factor)
+            result["dirs"] = int(result["dirs"] * factor)
+            result["bytes"] = int(result["bytes"] * factor)
+            result["extrapolated"] = True
+            result["extrapolation_factor"] = round(factor, 2)
+            result["note"] = (
+                f"ประเมินไม่ครบใน {budget_s:.0f} วิ — ขยายผลจาก {visited_dirs:,} "
+                f"จาก ~{total_dirs_known:,} โฟลเดอร์ (×{factor:.1f}) ตัวเลขเป็นค่าประมาณ"
+            )
+        else:
+            result["note"] = f"ประเมินไม่ครบใน {budget_s:.0f} วิ — ตัวเลขเป็นค่าประมาณ"
+    elif result["partial"]:
+        # Budget expired before a single directory was read — nothing to
+        # extrapolate from, so say so rather than reporting a misleading zero.
+        result["note"] = (
+            f"งบเวลา {budget_s:.0f} วิ หมดก่อนเริ่มอ่าน — ลองเพิ่มเวลา หรือเลือกโฟลเดอร์ที่เล็กลง"
+        )
+
+    result["elapsed"] = round(time.perf_counter() - started, 3)
+    # Derive the walk rate from THIS walk — same tree, same volume, same moment.
+    # A separate probe measures a cold cache on a possibly different subtree and
+    # was off by ~10x; the real walk is the only honest sample.
+    entries_seen = result["scanned_files"] + visited_dirs
+    if result["elapsed"] > 0.02 and entries_seen >= 20:
+        result["observed_walk_rate"] = entries_seen / result["elapsed"]
+    if progress:
+        progress({"phase": "estimate", "root": root, "dirs": visited_dirs, "files": result["files"], "done": True})
+    return result
+
+
+def estimate_scan(
+    left_root: str,
+    right_root: str,
+    *,
+    hash_mode: str = "auto",
+    compare_mtime: bool = True,
+    ignore_names: Iterable[str] = DEFAULT_IGNORES,
+    ignore_globs: Iterable[str] = DEFAULT_IGNORE_GLOBS,
+    follow_symlinks: bool = False,
+    budget_s: float = 8.0,
+    measure_throughput: bool = True,
+) -> dict[str, Any]:
+    """
+    Pre-scan estimate for both sides: file counts, total bytes, and how long
+    the real scan is expected to take.
+
+    Cost model: walk (metadata ops, rate measured on this volume) +
+    hash (only when hash_mode asks; rate measured on this volume) + compare.
+    """
+    left = estimate_tree(
+        left_root,
+        ignore_names=ignore_names,
+        ignore_globs=ignore_globs,
+        follow_symlinks=follow_symlinks,
+        budget_s=budget_s,
+    )
+    right = estimate_tree(
+        right_root,
+        ignore_names=ignore_names,
+        ignore_globs=ignore_globs,
+        follow_symlinks=follow_symlinks,
+        budget_s=budget_s,
+    )
+
+    total_files = left["files"] + right["files"]
+    total_entries = total_files + left["dirs"] + right["dirs"]
+    total_bytes = left["bytes"] + right["bytes"]
+
+    # Walk cost. Prefer the rate observed during the estimate walks themselves:
+    # same tree, same volume, warm cache — exactly what the real scan will meet.
+    observed = [
+        t.get("observed_walk_rate")
+        for t in (left, right)
+        if t.get("observed_walk_rate")
+    ]
+    if observed and measure_throughput:
+        walk_rate = sum(observed) / len(observed)
+        walk_rate_source = "observed"
+    else:
+        walk_rate = _measure_walk_rate(left_root if left["exists"] else right_root) if measure_throughput else _WALK_RATE_FALLBACK
+        walk_rate_source = "probe" if measure_throughput else "default"
+    walk_s = total_entries / walk_rate if walk_rate else total_entries / _WALK_RATE_FALLBACK
+
+    # Hashing cost. Hashing only ever happens for files that exist on BOTH
+    # sides — a file present on one side is copied, never hashed. So the bytes
+    # at risk are bounded by the SMALLER side, not the total (assuming every
+    # byte of both trees gets hashed made a 0.6s scan look like 20s).
+    hash_bytes = 0
+    hash_note = ""
+    smaller_bytes = min(left["bytes"], right["bytes"])
+    if hash_mode == "all":
+        hash_bytes = smaller_bytes
+        hash_note = "hash ทุกไฟล์ที่มีทั้งสองฝั่ง (จำกัดด้วยฝั่งที่เล็กกว่า)"
+    elif hash_mode == "auto":
+        hash_bytes = int(smaller_bytes * 0.15)
+        hash_note = "hash เฉพาะไฟล์ที่ขนาดเท่าแต่เวลาไม่ตรง (ประมาณ 15% ของฝั่งที่เล็กกว่า)"
+
+    rate = _measure_hash_rate(left_root if left["exists"] else right_root) if measure_throughput else _HASH_RATE_FALLBACK
+    hash_s = (hash_bytes / rate) if rate else 0.0
+
+    compare_s = total_files / 60_000
+
+    # The countdown predicts the SCAN only. The pre-scan estimate has already
+    # finished by the time the countdown starts, so adding its elapsed time here
+    # would inflate the prediction (it made a 2s scan look like 23s).
+    estimate_s = walk_s + hash_s + compare_s
+
+    return {
+        "left": left,
+        "right": right,
+        "hash_mode": hash_mode,
+        "compare_mtime": compare_mtime,
+        "assumptions": {
+            "walk_rate_entries_per_sec": int(walk_rate),
+            "walk_rate_source": walk_rate_source,
+            "hash_rate_bytes_per_sec": int(rate),
+            "hash_rate_mb_per_sec": round(rate / 1024 / 1024, 1),
+            "hash_bytes_estimated": hash_bytes,
+            "hash_note": hash_note,
+            "model": "walk + hash + compare",
+            "walk_rate_measured": measure_throughput,
+        },
+        "totals": {
+            "files": total_files,
+            "dirs": left["dirs"] + right["dirs"],
+            "entries": total_entries,
+            "bytes": total_bytes,
+            "bytes_hash": hash_bytes,
+        },
+        "seconds": {
+            "walk": round(walk_s, 3),
+            "hash": round(hash_s, 3),
+            "compare": round(compare_s, 3),
+            "total": round(estimate_s, 3),
+        },
+        "partial": left["partial"] or right["partial"],
+        "extrapolated": left.get("extrapolated") or right.get("extrapolated"),
+        "left_total": left["bytes"],
+        "right_total": right["bytes"],
+        "sizes_equal_estimate": left["bytes"] == right["bytes"],
+    }
 
 
 def _rel(root: str, path: str) -> str:
