@@ -151,6 +151,17 @@ mtime tolerance, การวางแผนซิงค์ทั้ง 3 ทิ
 คัดลอกจริงแล้วเท่ากันจริง, backup, checksum, กันพาธ traversal,
 การยกเลิกกลางทาง, API ทุก endpoint, และ security (traversal/secret files)
 
+## แผนพัฒนาเป็นแอป (macOS / Windows / iOS / Android / Linux)
+
+ดู [ROADMAP.md](ROADMAP.md) — แผนงานพร้อมข้อจำกัดแพลตฟอร์มที่ต้องรู้ก่อนตัดสินใจ
+
+**สรุปสั้น:** แนะนำ **Tauri v2** (โค้ดเบสเดียว 5 แพลตฟอร์ม, ใช้ UI เดิมซ้ำได้)
+โดยทำ desktop 3 OS ก่อน (4–6 วัน) แล้วค่อย mobile (2–3 สัปดาห์)
+
+**สิ่งที่ต้องรู้ก่อน:** mobile ไม่ใช่การ port — iOS App Sandbox และ Android Scoped Storage
+**ห้าม**ให้แอปสแกนโฟลเดอร์/ไดรฟ์ตามอำเภอใจ บนมือถือจะเลือกได้ทีละโฟลเดอร์ที่ผู้ใช้อนุญาตเท่านั้น
+(รายละเอียดใน ROADMAP.md ข้อ 2)
+
 ## ข้อจำกัดที่ต้องรู้
 
 - **macOS TCC** — โฟลเดอร์ที่ระบบป้องกัน (Desktop/Documents/Downloads, วอลุ่มถอดได้) ต้องอนุญาตให้ Terminal หรือแอปที่รัน FDVS ก่อน ระบบจะแจ้งพร้อมปุ่มเปิด System Settings
