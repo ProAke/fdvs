@@ -180,21 +180,23 @@ print('pred',est['seconds']['total'],'actual',round(act,2),'ratio',round(act/est
 
 ---
 
-## Backup migration — 2026-10-18 14:40 +07
+## Backup migration — 2026-10-18 14:40–14:44 +07
 
-ย้าย backup ของ MNG Dashboard จากที่กระจัดกระจาย 3 ที่ → `/Volumes/MNG/Home_Backup/MNG-Dashboard/`
+ย้าย backup ของ MNG Dashboard จากที่กระจัดกระจาย 4 ที่ → `/Volumes/MNG/Home_Backup/MNG-Dashboard/`
 
 | จาก | ไป | จำนวน |
 |---|---|---|
 | `/Volumes/MNG/index.html.bak*` (top level) | `top-level/` | 11 |
-| `/Volumes/MNG/.backup/` (ไฟล์) | `dot-backup/` | 49 |
+| `/Volumes/MNG/.backup/` (ไฟล์) | `dot-backup/` | 29 |
 | `/Volumes/MNG/.backup/*/` (snapshot) | `dot-backup/snapshots/` | 20 |
-| `/Volumes/MNG/Backup/index.html.*` | `Backup-folder/` | 12 |
+| `/Volumes/MNG/Backup/index.html.*` | `Backup-folder/` | 9 |
 | `/Volumes/MNG/Backup/tmp/` | `Backup-folder/tmp/` | 3 |
+| `/Volumes/MNG/backup_mng/pre-nuxt-*/` | `backup_mng-pre-nuxt/` | 62 |
 
-- **63 รายการ · 1,626,815 ไบต์** · ทุกไฟล์ verify SHA-256 ก่อนลบต้นทาง
-- ลบ container ว่างแล้ว: `.backup/`, `Backup/tmp/`
-- **ไม่ย้าย:** `Backup/vulcananti-scale.com.*` (เว็บลูกค้า) · `Backup/revslider*.zip` (ปลั๊กอิน)
+- **122 รายการ · 2,510,468 ไบต์** · ทุกไฟล์ verify SHA-256 ก่อนลบต้นทาง
+- ลบ container ว่างแล้ว: `.backup/`, `Backup/tmp/`, `backup_mng/pre-nuxt-20261014-164059+0700/`
+- **ไม่ย้าย:** `Backup/vulcananti-scale.com.*` (เว็บลูกค้า) · `Backup/revslider*.zip` (ปลั๊กอิน) · `backup_mng/staging-test-data/`
+- ใน `backup_mng-pre-nuxt/legacy-backups/` มี 10 ไฟล์ที่เนื้อหาซ้ำกับที่อื่น (SHA-256 ตรง) แต่ชื่อต่างกัน — เก็บทั้งสองที่เพราะชื่อคือ provenance
 - ไฟล์ประกอบใน `Home_Backup/MNG-Dashboard/`: `README.md`, `MIGRATION-MANIFEST.json`, `rollback.sh`
 - สคริปต์: `scripts/migrate_backups.py`
 
